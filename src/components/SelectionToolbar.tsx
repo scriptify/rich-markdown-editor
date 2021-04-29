@@ -53,7 +53,7 @@ function isVisible(props) {
   const fragment = slice.content;
   const nodes = fragment.content;
 
-  return some(nodes, n => n.content.size);
+  return some(nodes, (n) => n.content.size);
 }
 
 export default class SelectionToolbar extends React.Component<Props> {

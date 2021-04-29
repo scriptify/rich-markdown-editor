@@ -65,12 +65,12 @@ export default function formattingMenuItems(
       active: isMarkActive(schema.marks.highlight),
       visible: !isTemplate,
     },
-    {
-      name: "code_inline",
-      tooltip: dictionary.codeInline,
-      icon: CodeIcon,
-      active: isMarkActive(schema.marks.code_inline),
-    },
+    // {
+    //   name: "code_inline",
+    //   tooltip: dictionary.codeInline,
+    //   icon: CodeIcon,
+    //   active: isMarkActive(schema.marks.code_inline),
+    // },
     {
       name: "separator",
       visible: allowBlocks,
