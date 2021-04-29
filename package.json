@@ -1,6 +1,6 @@
 {
-  "name": "rich-markdown-editor",
-  "description": "A rich text editor with Markdown shortcuts",
+  "name": "marktown",
+  "description": "A rich text editor with Markdown shortcuts for React",
   "version": "11.7.0",
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
