@@ -102,13 +102,13 @@ export default function blockMenuItems(
       shortcut: `${mod} _`,
       keywords: "horizontal rule break line",
     },
-    {
-      name: "hr",
-      title: dictionary.pageBreak,
-      icon: PageBreakIcon,
-      keywords: "page print break line",
-      attrs: { markup: "***" },
-    },
+    // {
+    //   name: "hr",
+    //   title: dictionary.pageBreak,
+    //   icon: PageBreakIcon,
+    //   keywords: "page print break line",
+    //   attrs: { markup: "***" },
+    // },
     {
       name: "image",
       title: dictionary.image,
