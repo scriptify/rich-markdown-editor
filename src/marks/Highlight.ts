@@ -26,8 +26,8 @@ export default class Highlight extends Mark {
 
   get toMarkdown() {
     return {
-      open: "==",
-      close: "==",
+      open: "<mark>",
+      close: "</mark>",
       mixable: true,
       expelEnclosingWhitespace: true,
     };
