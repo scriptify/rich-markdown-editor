@@ -11,20 +11,24 @@ import { inputRules, InputRule } from "prosemirror-inputrules";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
 import { selectColumn, selectRow, selectTable } from "prosemirror-utils";
-import styled, { ThemeProvider } from "styled-components";
-import { light as lightTheme, dark as darkTheme } from "./theme";
+import { ThemeProvider } from "styled-components";
+import { light as lightTheme, dark as darkTheme } from "./styles/theme";
 import baseDictionary from "./dictionary";
 import Flex from "./components/Flex";
 import { SearchResult } from "./components/LinkEditor";
 import { EmbedDescriptor, ToastType } from "./types";
 import SelectionToolbar from "./components/SelectionToolbar";
 import BlockMenu from "./components/BlockMenu";
+import EmojiMenu from "./components/EmojiMenu";
 import LinkToolbar from "./components/LinkToolbar";
 import Tooltip from "./components/Tooltip";
 import Extension from "./lib/Extension";
 import ExtensionManager from "./lib/ExtensionManager";
 import ComponentView from "./lib/ComponentView";
 import headingToSlug from "./lib/headingToSlug";
+
+// styles
+import { StyledEditor } from "./styles/editor";
 
 // nodes
 import ReactNode from "./nodes/ReactNode";
@@ -35,6 +39,7 @@ import BulletList from "./nodes/BulletList";
 import CodeBlock from "./nodes/CodeBlock";
 import CodeFence from "./nodes/CodeFence";
 import CheckboxList from "./nodes/CheckboxList";
+import Emoji from "./nodes/Emoji";
 import CheckboxItem from "./nodes/CheckboxItem";
 import Embed from "./nodes/Embed";
 import HardBreak from "./nodes/HardBreak";
@@ -62,13 +67,16 @@ import Underline from "./marks/Underline";
 
 // plugins
 import BlockMenuTrigger from "./plugins/BlockMenuTrigger";
+import EmojiTrigger from "./plugins/EmojiTrigger";
+import Folding from "./plugins/Folding";
 import History from "./plugins/History";
 import Keys from "./plugins/Keys";
 import MaxLength from "./plugins/MaxLength";
 import Placeholder from "./plugins/Placeholder";
 import SmartText from "./plugins/SmartText";
 import TrailingNode from "./plugins/TrailingNode";
-import MarkdownPaste from "./plugins/MarkdownPaste";
+import PasteHandler from "./plugins/PasteHandler";
+import { PluginSimple } from "markdown-it";
 
 export { schema, parser, serializer, renderToHtml } from "./server";
 
@@ -82,11 +90,42 @@ export type Props = {
   defaultValue: string;
   placeholder: string;
   extensions: Extension[];
+  disableExtensions?: (
+    | "strong"
+    | "code_inline"
+    | "highlight"
+    | "em"
+    | "link"
+    | "placeholder"
+    | "strikethrough"
+    | "underline"
+    | "blockquote"
+    | "bullet_list"
+    | "checkbox_item"
+    | "checkbox_list"
+    | "code_block"
+    | "code_fence"
+    | "embed"
+    | "br"
+    | "heading"
+    | "hr"
+    | "image"
+    | "list_item"
+    | "container_notice"
+    | "ordered_list"
+    | "paragraph"
+    | "table"
+    | "td"
+    | "th"
+    | "tr"
+    | "emoji"
+  )[];
   autoFocus?: boolean;
   readOnly?: boolean;
   readOnlyWriteCheckboxes?: boolean;
   dictionary?: Partial<typeof baseDictionary>;
   dark?: boolean;
+  dir?: string;
   theme?: typeof theme;
   template?: boolean;
   headingsOffset?: number;
@@ -100,7 +139,7 @@ export type Props = {
   onFocus?: () => void;
   onSave?: ({ done: boolean }) => void;
   onCancel?: () => void;
-  onChange: (value: () => string) => void;
+  onChange?: (value: () => string) => void;
   onImageUploadStart?: () => void;
   onImageUploadStop?: () => void;
   onCreateLink?: (title: string) => Promise<string>;
@@ -113,15 +152,17 @@ export type Props = {
   onShowToast?: (message: string, code: ToastType) => void;
   tooltip: typeof React.Component | React.FC<any>;
   className?: string;
-  style?: Record<string, string>;
+  style?: React.CSSProperties;
 };
 
 type State = {
+  isRTL: boolean;
   isEditorFocused: boolean;
   selectionMenuOpen: boolean;
   blockMenuOpen: boolean;
   linkMenuOpen: boolean;
   blockMenuSearch: string;
+  emojiMenuOpen: boolean;
 };
 
 type Step = {
@@ -131,6 +172,7 @@ type Step = {
 class RichMarkdownEditor extends React.PureComponent<Props, State> {
   static defaultProps = {
     defaultValue: "",
+    dir: "auto",
     placeholder: "Write something nice…",
     onImageUploadStart: () => {
       // no default behavior
@@ -147,11 +189,13 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
   };
 
   state = {
+    isRTL: false,
     isEditorFocused: false,
     selectionMenuOpen: false,
     blockMenuOpen: false,
     linkMenuOpen: false,
     blockMenuSearch: "",
+    emojiMenuOpen: false,
   };
 
   isBlurred: boolean;
@@ -161,6 +205,7 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
   schema: Schema;
   serializer: MarkdownSerializer;
   parser: MarkdownParser;
+  pasteParser: MarkdownParser;
   plugins: Plugin[];
   keymaps: Plugin[];
   inputRules: InputRule[];
@@ -170,6 +215,7 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
   nodes: { [name: string]: NodeSpec };
   marks: { [name: string]: MarkSpec };
   commands: Record<string, any>;
+  rulePlugins: PluginSimple[];
 
   componentDidMount() {
     this.init();
@@ -177,6 +223,8 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
     if (this.props.scrollTo) {
       this.scrollToAnchor(this.props.scrollTo);
     }
+
+    this.calculateDir();
 
     if (this.props.readOnly) return;
 
@@ -208,6 +256,10 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
     // is set to true
     if (prevProps.readOnly && !this.props.readOnly && this.props.autoFocus) {
       this.focusAtEnd();
+    }
+
+    if (prevProps.dir !== this.props.dir) {
+      this.calculateDir();
     }
 
     if (
@@ -243,9 +295,11 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
     this.marks = this.createMarks();
     this.schema = this.createSchema();
     this.plugins = this.createPlugins();
+    this.rulePlugins = this.createRulePlugins();
     this.keymaps = this.createKeymaps();
     this.serializer = this.createSerializer();
     this.parser = this.createParser();
+    this.pasteParser = this.createPasteParser();
     this.inputRules = this.createInputRules();
     this.nodeViews = this.createNodeViews();
     this.view = this.createView();
@@ -258,84 +312,104 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
     // adding nodes here? Update schema.ts for serialization on the server
     return new ExtensionManager(
       [
-        new Doc(),
-        new Text(),
-        new HardBreak(),
-        new Paragraph(),
-        new Blockquote(),
-        new CodeBlock({
-          dictionary,
-          onShowToast: this.props.onShowToast,
-        }),
-        new CodeFence({
-          dictionary,
-          onShowToast: this.props.onShowToast,
-        }),
-        new CheckboxList(),
-        new CheckboxItem(),
-        new BulletList(),
-        new Embed(),
-        new ListItem(),
-        new Notice({
-          dictionary,
-        }),
-        new Heading({
-          dictionary,
-          onShowToast: this.props.onShowToast,
-          offset: this.props.headingsOffset,
-        }),
-        new HorizontalRule(),
-        new Image({
-          dictionary,
-          uploadImage: this.props.uploadImage,
-          onImageUploadStart: this.props.onImageUploadStart,
-          onImageUploadStop: this.props.onImageUploadStop,
-          onShowToast: this.props.onShowToast,
-        }),
-        new Table(),
-        new TableCell({
-          onSelectTable: this.handleSelectTable,
-          onSelectRow: this.handleSelectRow,
-        }),
-        new TableHeadCell({
-          onSelectColumn: this.handleSelectColumn,
-        }),
-        new TableRow(),
-        new Bold(),
-        new Code(),
-        new Highlight(),
-        new Italic(),
-        new TemplatePlaceholder(),
-        new Underline(),
-        new Link({
-          onKeyboardShortcut: this.handleOpenLinkMenu,
-          onClickLink: this.props.onClickLink,
-          onClickHashtag: this.props.onClickHashtag,
-          onHoverLink: this.props.onHoverLink,
-        }),
-        new Strikethrough(),
-        new OrderedList(),
-        new History(),
-        new SmartText(),
-        new TrailingNode(),
-        new MarkdownPaste(),
-        new Keys({
-          onBlur: this.handleEditorBlur,
-          onFocus: this.handleEditorFocus,
-          onSave: this.handleSave,
-          onSaveAndExit: this.handleSaveAndExit,
-          onCancel: this.props.onCancel,
-        }),
-        new BlockMenuTrigger({
-          dictionary,
-          onOpen: this.handleOpenBlockMenu,
-          onClose: this.handleCloseBlockMenu,
-        }),
-        new Placeholder({
-          placeholder: this.props.placeholder,
-        }),
-        new MaxLength({
-          maxLength: this.props.maxLength,
+        ...[
+          new Doc(),
+          new HardBreak(),
+          new Paragraph(),
+          new Blockquote(),
+          new CodeBlock({
+            dictionary,
+            onShowToast: this.props.onShowToast,
+          }),
+          new CodeFence({
+            dictionary,
+            onShowToast: this.props.onShowToast,
+          }),
+          new Emoji(),
+          new Text(),
+          new CheckboxList(),
+          new CheckboxItem(),
+          new BulletList(),
+          new Embed({ embeds: this.props.embeds }),
+          new ListItem(),
+          new Notice({
+            dictionary,
+          }),
+          new Heading({
+            dictionary,
+            onShowToast: this.props.onShowToast,
+            offset: this.props.headingsOffset,
+          }),
+          new HorizontalRule(),
+          new Image({
+            dictionary,
+            uploadImage: this.props.uploadImage,
+            onImageUploadStart: this.props.onImageUploadStart,
+            onImageUploadStop: this.props.onImageUploadStop,
+            onShowToast: this.props.onShowToast,
+          }),
+          new Table(),
+          new TableCell({
+            onSelectTable: this.handleSelectTable,
+            onSelectRow: this.handleSelectRow,
+          }),
+          new TableHeadCell({
+            onSelectColumn: this.handleSelectColumn,
+          }),
+          new TableRow(),
+          new Bold(),
+          new Code(),
+          new Highlight(),
+          new Italic(),
+          new TemplatePlaceholder(),
+          new Underline(),
+          new Link({
+            onKeyboardShortcut: this.handleOpenLinkMenu,
+            onClickLink: this.props.onClickLink,
+            onClickHashtag: this.props.onClickHashtag,
+            onHoverLink: this.props.onHoverLink,
+          }),
+          new Strikethrough(),
+          new OrderedList(),
+          new History(),
+          new Folding(),
+          new SmartText(),
+          new TrailingNode(),
+          new PasteHandler(),
+          new Keys({
+            onBlur: this.handleEditorBlur,
+            onFocus: this.handleEditorFocus,
+            onSave: this.handleSave,
+            onSaveAndExit: this.handleSaveAndExit,
+            onCancel: this.props.onCancel,
+          }),
+          new BlockMenuTrigger({
+            dictionary,
+            onOpen: this.handleOpenBlockMenu,
+            onClose: this.handleCloseBlockMenu,
+          }),
+          new EmojiTrigger({
+            onOpen: (search: string) => {
+              this.setState({ emojiMenuOpen: true, blockMenuSearch: search });
+            },
+            onClose: () => {
+              this.setState({ emojiMenuOpen: false });
+            },
+          }),
+          new Placeholder({
+            placeholder: this.props.placeholder,
+          }),
+          new MaxLength({
+            maxLength: this.props.maxLength,
+          }),
+        ].filter((extension) => {
+          // Optionaly disable extensions
+          if (this.props.disableExtensions) {
+            return !(this.props.disableExtensions as string[]).includes(
+              extension.name
+            );
+          }
+          return true;
         }),
         ...this.props.extensions,
       ],
@@ -345,6 +419,10 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
 
   createPlugins() {
     return this.extensions.plugins;
+  }
+
+  createRulePlugins() {
+    return this.extensions.rulePlugins;
   }
 
   createKeymaps() {
@@ -410,6 +488,15 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
   createParser() {
     return this.extensions.parser({
       schema: this.schema,
+      plugins: this.rulePlugins,
+    });
+  }
+
+  createPasteParser() {
+    return this.extensions.parser({
+      schema: this.schema,
+      rules: { linkify: true },
+      plugins: this.rulePlugins,
     });
   }
 
@@ -449,33 +536,37 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
       );
     };
 
+    const self = this; // eslint-disable-line
     const view = new EditorView(this.element, {
-      state: this.createState(),
+      state: this.createState(this.props.value),
       editable: () => !this.props.readOnly,
       nodeViews: this.nodeViews,
       handleDOMEvents: this.props.handleDOMEvents,
-      dispatchTransaction: (transaction) => {
-        const { state, transactions } = this.view.state.applyTransaction(
+      dispatchTransaction: function(transaction) {
+        // callback is bound to have the view instance as its this binding
+        const { state, transactions } = this.state.applyTransaction(
           transaction
         );
 
-        this.view.updateState(state);
+        this.updateState(state);
 
         // If any of the transactions being dispatched resulted in the doc
         // changing then call our own change handler to let the outside world
         // know
         if (
           transactions.some((tr) => tr.docChanged) &&
-          (!this.props.readOnly ||
-            (this.props.readOnlyWriteCheckboxes &&
+          (!self.props.readOnly ||
+            (self.props.readOnlyWriteCheckboxes &&
               transactions.some(isEditingCheckbox)))
         ) {
-          this.handleChange();
+          self.handleChange();
         }
+
+        self.calculateDir();
 
         // Because Prosemirror and React are not linked we must tell React that
         // a render is needed whenever the Prosemirror state changes.
-        this.forceUpdate();
+        self.forceUpdate();
       },
     });
 
@@ -498,6 +589,18 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
       console.warn(`Attempted to scroll to invalid hash: ${hash}`, err);
     }
   }
+
+  calculateDir = () => {
+    if (!this.element) return;
+
+    const isRTL =
+      this.props.dir === "rtl" ||
+      getComputedStyle(this.element).direction === "rtl";
+
+    if (this.state.isRTL !== isRTL) {
+      this.setState({ isRTL });
+    }
+  };
 
   value = (): string => {
     return this.serializer.serialize(this.view.state.doc);
@@ -626,8 +729,9 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
     }
   );
 
-  render = () => {
+  render() {
     const {
+      dir,
       readOnly,
       readOnlyWriteCheckboxes,
       style,
@@ -635,6 +739,7 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
       className,
       onKeyDown,
     } = this.props;
+    const { isRTL } = this.state;
     const dictionary = this.dictionary(this.props.dictionary);
 
     return (
@@ -644,11 +749,14 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
         className={className}
         align="flex-start"
         justify="center"
+        dir={dir}
         column
       >
         <ThemeProvider theme={this.theme()}>
           <React.Fragment>
             <StyledEditor
+              dir={dir}
+              rtl={isRTL}
               readOnly={readOnly}
               readOnlyWriteCheckboxes={readOnlyWriteCheckboxes}
               ref={(ref) => (this.element = ref)}
@@ -659,6 +767,7 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
                   view={this.view}
                   dictionary={dictionary}
                   commands={this.commands}
+                  rtl={isRTL}
                   isTemplate={this.props.template === true}
                   onOpen={this.handleOpenSelectionMenu}
                   onClose={this.handleCloseSelectionMenu}
@@ -678,10 +787,20 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
                   onClose={this.handleCloseLinkMenu}
                   tooltip={tooltip}
                 />
+                <EmojiMenu
+                  view={this.view}
+                  commands={this.commands}
+                  dictionary={dictionary}
+                  rtl={isRTL}
+                  isActive={this.state.emojiMenuOpen}
+                  search={this.state.blockMenuSearch}
+                  onClose={() => this.setState({ emojiMenuOpen: false })}
+                />
                 <BlockMenu
                   view={this.view}
                   commands={this.commands}
                   dictionary={dictionary}
+                  rtl={isRTL}
                   isActive={this.state.blockMenuOpen}
                   search={this.state.blockMenuSearch}
                   onClose={this.handleCloseBlockMenu}
@@ -698,891 +817,7 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
         </ThemeProvider>
       </Flex>
     );
-  };
+  }
 }
-
-const StyledEditor = styled("div")<{
-  readOnly?: boolean;
-  readOnlyWriteCheckboxes?: boolean;
-}>`
-  color: ${(props) => props.theme.text};
-  background: ${(props) => props.theme.background};
-  font-family: ${(props) => props.theme.fontFamily};
-  font-weight: ${(props) => props.theme.fontWeight};
-  font-size: 1em;
-  line-height: 1.7em;
-  width: 100%;
-
-  .ProseMirror {
-    position: relative;
-    outline: none;
-    word-wrap: break-word;
-    white-space: pre-wrap;
-    white-space: break-spaces;
-    -webkit-font-variant-ligatures: none;
-    font-variant-ligatures: none;
-    font-feature-settings: "liga" 0; /* the above doesn't seem to work in Edge */
-  }
-
-  pre {
-    white-space: pre-wrap;
-  }
-
-  li {
-    position: relative;
-  }
-
-  .image {
-    text-align: center;
-    max-width: 100%;
-    clear: both;
-
-    img {
-      pointer-events: ${(props) => (props.readOnly ? "initial" : "none")};
-      display: inline-block;
-      max-width: 100%;
-      max-height: 75vh;
-    }
-  }
-
-  .image.placeholder {
-    position: relative;
-    background: ${(props) => props.theme.background};
-    img {
-      opacity: 0.5;
-    }
-  }
-
-  .image-right-50 {
-    float: right;
-    width: 50%;
-    margin-left: 2em;
-    margin-bottom: 1em;
-    clear: initial;
-  }
-
-  .image-left-50 {
-    float: left;
-    width: 50%;
-    margin-right: 2em;
-    margin-bottom: 1em;
-    clear: initial;
-  }
-
-  .ProseMirror-hideselection *::selection {
-    background: transparent;
-  }
-  .ProseMirror-hideselection *::-moz-selection {
-    background: transparent;
-  }
-  .ProseMirror-hideselection {
-    caret-color: transparent;
-  }
-
-  .ProseMirror-selectednode {
-    outline: 2px solid
-      ${(props) => (props.readOnly ? "transparent" : props.theme.selected)};
-  }
-
-  /* Make sure li selections wrap around markers */
-
-  li.ProseMirror-selectednode {
-    outline: none;
-  }
-
-  li.ProseMirror-selectednode:after {
-    content: "";
-    position: absolute;
-    left: -32px;
-    right: -2px;
-    top: -2px;
-    bottom: -2px;
-    border: 2px solid ${(props) => props.theme.selected};
-    pointer-events: none;
-  }
-
-  .ProseMirror[contenteditable="false"] {
-    .caption {
-      pointer-events: none;
-    }
-    .caption:empty {
-      visibility: hidden;
-    }
-  }
-
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
-    margin: 1em 0 0.5em;
-    font-weight: 500;
-    cursor: default;
-
-    &:not(.placeholder):before {
-      display: ${(props) => (props.readOnly ? "none" : "inline-block")};
-      font-family: ${(props) => props.theme.fontFamilyMono};
-      color: ${(props) => props.theme.textSecondary};
-      font-size: 13px;
-      line-height: 0;
-      margin-left: -24px;
-      width: 24px;
-    }
-
-    &:hover {
-      .heading-anchor {
-        opacity: 1;
-      }
-    }
-  }
-  .heading-content {
-    &:before {
-      content: "​";
-      display: inline;
-    }
-  }
-  .heading-name {
-    color: ${(props) => props.theme.text};
-
-    &:hover {
-      text-decoration: none;
-    }
-  }
-
-  a:first-child {
-    h1,
-    h2,
-    h3,
-    h4,
-    h5,
-    h6 {
-      margin-top: 0;
-    }
-  }
-
-  h1:not(.placeholder):before {
-    content: "H1";
-  }
-  h2:not(.placeholder):before {
-    content: "H2";
-  }
-  h3:not(.placeholder):before {
-    content: "H3";
-  }
-  h4:not(.placeholder):before {
-    content: "H4";
-  }
-  h5:not(.placeholder):before {
-    content: "H5";
-  }
-  h6:not(.placeholder):before {
-    content: "H6";
-  }
-
-  .with-emoji {
-    margin-left: -1em;
-  }
-
-  .heading-anchor {
-    opacity: 0;
-    display: ${(props) => (props.readOnly ? "inline-block" : "none")};
-    color: ${(props) => props.theme.textSecondary};
-    cursor: pointer;
-    background: none;
-    border: 0;
-    outline: none;
-    padding: 2px 12px 2px 4px;
-    margin: 0;
-    transition: opacity 100ms ease-in-out;
-    font-family: ${(props) => props.theme.fontFamilyMono};
-    font-size: 22px;
-    line-height: 0;
-    margin-left: -24px;
-    width: 24px;
-
-    &:focus,
-    &:hover {
-      color: ${(props) => props.theme.text};
-    }
-  }
-
-  .placeholder {
-    &:before {
-      display: block;
-      content: ${(props) => (props.readOnly ? "" : "attr(data-empty-text)")};
-      pointer-events: none;
-      height: 0;
-      color: ${(props) => props.theme.placeholder};
-    }
-  }
-
-  @media print {
-    .placeholder {
-      display: none;
-    }
-  }
-
-  .notice-block {
-    display: flex;
-    align-items: center;
-    background: ${(props) => props.theme.noticeInfoBackground};
-    color: ${(props) => props.theme.noticeInfoText};
-    border-radius: 4px;
-    padding: 8px 16px;
-    margin: 8px 0;
-
-    a {
-      color: ${(props) => props.theme.noticeInfoText};
-    }
-
-    a:not(.heading-name) {
-      text-decoration: underline;
-    }
-  }
-
-  .notice-block .content {
-    flex-grow: 1;
-  }
-
-  .notice-block .icon {
-    width: 24px;
-    height: 24px;
-    align-self: flex-start;
-    margin-right: 4px;
-    position: relative;
-    top: 1px;
-  }
-
-  .notice-block.tip {
-    background: ${(props) => props.theme.noticeTipBackground};
-    color: ${(props) => props.theme.noticeTipText};
-
-    a {
-      color: ${(props) => props.theme.noticeTipText};
-    }
-  }
-
-  .notice-block.warning {
-    background: ${(props) => props.theme.noticeWarningBackground};
-    color: ${(props) => props.theme.noticeWarningText};
-
-    a {
-      color: ${(props) => props.theme.noticeWarningText};
-    }
-  }
-
-  blockquote {
-    margin: 0;
-    padding-left: 1em;
-    font-style: italic;
-    overflow: hidden;
-    position: relative;
-
-    &:before {
-      content: "";
-      display: inline-block;
-      width: 3px;
-      border-radius: 1px;
-      position: absolute;
-      margin-left: -16px;
-      top: 0;
-      bottom: 0;
-      background: ${(props) => props.theme.quote};
-    }
-  }
-
-  b,
-  strong {
-    font-weight: 600;
-  }
-
-  .template-placeholder {
-    color: ${(props) => props.theme.placeholder};
-    border-bottom: 1px dotted ${(props) => props.theme.placeholder};
-    border-radius: 2px;
-    cursor: text;
-
-    &:hover {
-      border-bottom: 1px dotted
-        ${(props) =>
-          props.readOnly ? props.theme.placeholder : props.theme.textSecondary};
-    }
-  }
-
-  p {
-    margin: 0;
-  }
-
-  a {
-    color: ${(props) => props.theme.link};
-  }
-
-  a:hover {
-    text-decoration: ${(props) => (props.readOnly ? "underline" : "none")};
-  }
-
-  ul,
-  ol {
-    margin: 0 0.1em 0 -26px;
-    padding: 0 0 0 44px;
-
-    ul,
-    ol {
-      margin-right: -24px;
-    }
-  }
-
-  ol ol {
-    list-style: lower-alpha;
-  }
-
-  ol ol ol {
-    list-style: lower-roman;
-  }
-
-  ul.checkbox_list {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 0 -24px;
-  }
-
-  ul li,
-  ol li {
-    position: relative;
-    white-space: initial;
-
-    p {
-      white-space: pre-wrap;
-    }
-
-    > div {
-      width: 100%;
-    }
-  }
-
-  ul.checkbox_list li {
-    display: flex;
-    padding-left: 24px;
-  }
-
-  ul.checkbox_list li.checked > div > p {
-    color: ${(props) => props.theme.textSecondary};
-    text-decoration: line-through;
-  }
-
-  ul li::before,
-  ol li::before {
-    background: url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3QgeD0iOCIgeT0iNyIgd2lkdGg9IjMiIGhlaWdodD0iMiIgcng9IjEiIGZpbGw9IiM0RTVDNkUiLz4KPHJlY3QgeD0iOCIgeT0iMTEiIHdpZHRoPSIzIiBoZWlnaHQ9IjIiIHJ4PSIxIiBmaWxsPSIjNEU1QzZFIi8+CjxyZWN0IHg9IjgiIHk9IjE1IiB3aWR0aD0iMyIgaGVpZ2h0PSIyIiByeD0iMSIgZmlsbD0iIzRFNUM2RSIvPgo8cmVjdCB4PSIxMyIgeT0iNyIgd2lkdGg9IjMiIGhlaWdodD0iMiIgcng9IjEiIGZpbGw9IiM0RTVDNkUiLz4KPHJlY3QgeD0iMTMiIHk9IjExIiB3aWR0aD0iMyIgaGVpZ2h0PSIyIiByeD0iMSIgZmlsbD0iIzRFNUM2RSIvPgo8cmVjdCB4PSIxMyIgeT0iMTUiIHdpZHRoPSIzIiBoZWlnaHQ9IjIiIHJ4PSIxIiBmaWxsPSIjNEU1QzZFIi8+Cjwvc3ZnPgo=");
-    content: "";
-    display: ${(props) => (props.readOnly ? "none" : "inline-block")};
-    cursor: move;
-    width: 24px;
-    height: 24px;
-    position: absolute;
-    left: -40px;
-    top: 2px;
-    opacity: 0;
-    transition: opacity 200ms ease-in-out;
-  }
-
-  ul > li.hovering::before,
-  ol li.hovering::before {
-    opacity: 0.5;
-  }
-
-  ul li.ProseMirror-selectednode::after,
-  ol li.ProseMirror-selectednode::after {
-    display: none;
-  }
-
-  ul.checkbox_list li::before {
-    left: 0;
-  }
-
-  ul.checkbox_list li input {
-    pointer-events: ${(props) =>
-      props.readOnly && !props.readOnlyWriteCheckboxes ? "none" : "initial"};
-    opacity: ${(props) =>
-      props.readOnly && !props.readOnlyWriteCheckboxes ? 0.75 : 1};
-    margin: 0.5em 0.5em 0 0;
-    width: 14px;
-    height: 14px;
-  }
-
-  li p:first-child {
-    margin: 0;
-    word-break: break-word;
-  }
-
-  hr {
-    position: relative;
-    height: 1em;
-    border: 0;
-  }
-
-  hr:before {
-    content: "";
-    display: block;
-    position: absolute;
-    border-top: 1px solid ${(props) => props.theme.horizontalRule};
-    top: 0.5em;
-    left: 0;
-    right: 0;
-  }
-
-  hr.page-break {
-    page-break-after: always;
-  }
-
-  hr.page-break:before {
-    border-top: 1px dashed ${(props) => props.theme.horizontalRule};
-  }
-
-  code {
-    border-radius: 4px;
-    border: 1px solid ${(props) => props.theme.codeBorder};
-    padding: 3px 4px;
-    font-family: ${(props) => props.theme.fontFamilyMono};
-    font-size: 85%;
-  }
-
-  mark {
-    border-radius: 1px;
-    color: ${(props) => props.theme.textHighlightForeground};
-    background: ${(props) => props.theme.textHighlight};
-
-    a {
-      color: ${(props) => props.theme.textHighlightForeground};
-    }
-  }
-
-  .code-block,
-  .notice-block {
-    position: relative;
-
-    select,
-    button {
-      background: ${(props) => props.theme.blockToolbarBackground};
-      color: ${(props) => props.theme.blockToolbarItem};
-      border-width: 1px;
-      font-size: 13px;
-      display: none;
-      position: absolute;
-      border-radius: 4px;
-      padding: 2px;
-      z-index: 1;
-      top: 4px;
-      right: 4px;
-    }
-
-    button {
-      padding: 2px 4px;
-    }
-
-    &:hover {
-      select {
-        display: ${(props) => (props.readOnly ? "none" : "inline")};
-      }
-
-      button {
-        display: ${(props) => (props.readOnly ? "inline" : "none")};
-      }
-    }
-
-    select:focus,
-    select:active {
-      display: inline;
-    }
-  }
-
-  pre {
-    display: block;
-    overflow-x: auto;
-    padding: 0.75em 1em;
-    line-height: 1.4em;
-    position: relative;
-    background: ${(props) => props.theme.codeBackground};
-    border-radius: 4px;
-    border: 1px solid ${(props) => props.theme.codeBorder};
-
-    -webkit-font-smoothing: initial;
-    font-family: ${(props) => props.theme.fontFamilyMono};
-    font-size: 13px;
-    direction: ltr;
-    text-align: left;
-    white-space: pre;
-    word-spacing: normal;
-    word-break: normal;
-    -moz-tab-size: 4;
-    -o-tab-size: 4;
-    tab-size: 4;
-    -webkit-hyphens: none;
-    -moz-hyphens: none;
-    -ms-hyphens: none;
-    hyphens: none;
-    color: ${(props) => props.theme.code};
-    margin: 0;
-
-    code {
-      font-size: 13px;
-      background: none;
-      padding: 0;
-      border: 0;
-    }
-  }
-
-  .token.comment,
-  .token.prolog,
-  .token.doctype,
-  .token.cdata {
-    color: ${(props) => props.theme.codeComment};
-  }
-
-  .token.punctuation {
-    color: ${(props) => props.theme.codePunctuation};
-  }
-
-  .token.namespace {
-    opacity: 0.7;
-  }
-
-  .token.operator,
-  .token.boolean,
-  .token.number {
-    color: ${(props) => props.theme.codeNumber};
-  }
-
-  .token.property {
-    color: ${(props) => props.theme.codeProperty};
-  }
-
-  .token.tag {
-    color: ${(props) => props.theme.codeTag};
-  }
-
-  .token.string {
-    color: ${(props) => props.theme.codeString};
-  }
-
-  .token.selector {
-    color: ${(props) => props.theme.codeSelector};
-  }
-
-  .token.attr-name {
-    color: ${(props) => props.theme.codeAttr};
-  }
-
-  .token.entity,
-  .token.url,
-  .language-css .token.string,
-  .style .token.string {
-    color: ${(props) => props.theme.codeEntity};
-  }
-
-  .token.attr-value,
-  .token.keyword,
-  .token.control,
-  .token.directive,
-  .token.unit {
-    color: ${(props) => props.theme.codeKeyword};
-  }
-
-  .token.function {
-    color: ${(props) => props.theme.codeFunction};
-  }
-
-  .token.statement,
-  .token.regex,
-  .token.atrule {
-    color: ${(props) => props.theme.codeStatement};
-  }
-
-  .token.placeholder,
-  .token.variable {
-    color: ${(props) => props.theme.codePlaceholder};
-  }
-
-  .token.deleted {
-    text-decoration: line-through;
-  }
-
-  .token.inserted {
-    border-bottom: 1px dotted ${(props) => props.theme.codeInserted};
-    text-decoration: none;
-  }
-
-  .token.italic {
-    font-style: italic;
-  }
-
-  .token.important,
-  .token.bold {
-    font-weight: bold;
-  }
-
-  .token.important {
-    color: ${(props) => props.theme.codeImportant};
-  }
-
-  .token.entity {
-    cursor: help;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    border-radius: 4px;
-    margin-top: 1em;
-    box-sizing: border-box;
-
-    * {
-      box-sizing: border-box;
-    }
-
-    tr {
-      position: relative;
-      border-bottom: 1px solid ${(props) => props.theme.tableDivider};
-    }
-
-    th {
-      background: ${(props) => props.theme.tableHeaderBackground};
-    }
-
-    td,
-    th {
-      position: relative;
-      vertical-align: top;
-      border: 1px solid ${(props) => props.theme.tableDivider};
-      position: relative;
-      padding: 4px 8px;
-      text-align: left;
-      min-width: 100px;
-    }
-
-    .selectedCell {
-      background: ${(props) =>
-        props.readOnly ? "inherit" : props.theme.tableSelectedBackground};
-
-      /* fixes Firefox background color painting over border:
-       * https://bugzilla.mozilla.org/show_bug.cgi?id=688556 */
-      background-clip: padding-box;
-    }
-
-    .grip-column {
-      /* usage of ::after for all of the table grips works around a bug in
-       * prosemirror-tables that causes Safari to hang when selecting a cell
-       * in an empty table:
-       * https://github.com/ProseMirror/prosemirror/issues/947 */
-      &::after {
-        content: "";
-        cursor: pointer;
-        position: absolute;
-        top: -16px;
-        left: 0;
-        width: 100%;
-        height: 12px;
-        background: ${(props) => props.theme.tableDivider};
-        border-bottom: 3px solid ${(props) => props.theme.background};
-        display: ${(props) => (props.readOnly ? "none" : "block")};
-      }
-
-      &:hover::after {
-        background: ${(props) => props.theme.text};
-      }
-      &.first::after {
-        border-top-left-radius: 3px;
-      }
-      &.last::after {
-        border-top-right-radius: 3px;
-      }
-      &.selected::after {
-        background: ${(props) => props.theme.tableSelected};
-      }
-    }
-
-    .grip-row {
-      &::after {
-        content: "";
-        cursor: pointer;
-        position: absolute;
-        left: -16px;
-        top: 0;
-        height: 100%;
-        width: 12px;
-        background: ${(props) => props.theme.tableDivider};
-        border-right: 3px solid ${(props) => props.theme.background};
-        display: ${(props) => (props.readOnly ? "none" : "block")};
-      }
-
-      &:hover::after {
-        background: ${(props) => props.theme.text};
-      }
-      &.first::after {
-        border-top-left-radius: 3px;
-      }
-      &.last::after {
-        border-bottom-left-radius: 3px;
-      }
-      &.selected::after {
-        background: ${(props) => props.theme.tableSelected};
-      }
-    }
-
-    .grip-table {
-      &::after {
-        content: "";
-        cursor: pointer;
-        background: ${(props) => props.theme.tableDivider};
-        width: 13px;
-        height: 13px;
-        border-radius: 13px;
-        border: 2px solid ${(props) => props.theme.background};
-        position: absolute;
-        top: -18px;
-        left: -18px;
-        display: ${(props) => (props.readOnly ? "none" : "block")};
-      }
-
-      &:hover::after {
-        background: ${(props) => props.theme.text};
-      }
-      &.selected::after {
-        background: ${(props) => props.theme.tableSelected};
-      }
-    }
-  }
-
-  .scrollable-wrapper {
-    position: relative;
-    margin: 0.5em 0px;
-    scrollbar-width: thin;
-    scrollbar-color: transparent transparent;
-
-    &:hover {
-      scrollbar-color: ${(props) => props.theme.scrollbarThumb}
-        ${(props) => props.theme.scrollbarBackground};
-    }
-
-    & ::-webkit-scrollbar {
-      height: 14px;
-      background-color: transparent;
-    }
-
-    &:hover ::-webkit-scrollbar {
-      background-color: ${(props) => props.theme.scrollbarBackground};
-    }
-
-    & ::-webkit-scrollbar-thumb {
-      background-color: transparent;
-      border: 3px solid transparent;
-      border-radius: 7px;
-    }
-
-    &:hover ::-webkit-scrollbar-thumb {
-      background-color: ${(props) => props.theme.scrollbarThumb};
-      border-color: ${(props) => props.theme.scrollbarBackground};
-    }
-  }
-
-  .scrollable {
-    overflow-y: hidden;
-    overflow-x: auto;
-    padding-left: 1em;
-    margin-left: -1em;
-    border-left: 1px solid transparent;
-    border-right: 1px solid transparent;
-    transition: border 250ms ease-in-out 0s;
-  }
-
-  .scrollable-shadow {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: -1em;
-    width: 16px;
-    transition: box-shadow 250ms ease-in-out;
-    border: 0px solid transparent;
-    border-left-width: 1em;
-    pointer-events: none;
-
-    &.left {
-      box-shadow: 16px 0 16px -16px inset rgba(0, 0, 0, 0.25);
-      border-left: 1em solid ${(props) => props.theme.background};
-    }
-
-    &.right {
-      right: 0;
-      left: auto;
-      box-shadow: -16px 0 16px -16px inset rgba(0, 0, 0, 0.25);
-    }
-  }
-
-  .block-menu-trigger {
-    display: ${(props) => (props.readOnly ? "none" : "inline")};
-    width: 24px;
-    height: 24px;
-    color: ${(props) => props.theme.textSecondary};
-    background: none;
-    position: absolute;
-    transition: color 150ms cubic-bezier(0.175, 0.885, 0.32, 1.275),
-      transform 150ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    outline: none;
-    border: 0;
-    padding: 0;
-    margin-top: 1px;
-    margin-left: -24px;
-
-    &:hover,
-    &:focus {
-      cursor: pointer;
-      transform: scale(1.2);
-      color: ${(props) => props.theme.text};
-    }
-  }
-
-  @media print {
-    .block-menu-trigger {
-      display: none;
-    }
-
-    .page-break {
-      opacity: 0;
-    }
-  }
-
-  .ProseMirror-gapcursor {
-    display: none;
-    pointer-events: none;
-    position: absolute;
-  }
-
-  .ProseMirror-gapcursor:after {
-    content: "";
-    display: block;
-    position: absolute;
-    top: -2px;
-    width: 20px;
-    border-top: 1px solid ${(props) => props.theme.cursor};
-    animation: ProseMirror-cursor-blink 1.1s steps(2, start) infinite;
-  }
-
-  @keyframes ProseMirror-cursor-blink {
-    to {
-      visibility: hidden;
-    }
-  }
-
-  .ProseMirror-focused .ProseMirror-gapcursor {
-    display: block;
-  }
-
-  @media print {
-    em,
-    blockquote {
-      font-family: "SF Pro Text", ${(props) => props.theme.fontFamily};
-    }
-  }
-`;
 
 export default RichMarkdownEditor;

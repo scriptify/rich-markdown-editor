@@ -48,7 +48,11 @@ export const base = {
   blockToolbarTrigger: colors.greyMid,
   blockToolbarTriggerIcon: colors.white,
   blockToolbarItem: colors.almostBlack,
+  blockToolbarIcon: undefined,
+  blockToolbarIconSelected: colors.black,
   blockToolbarText: colors.almostBlack,
+  blockToolbarTextSelected: colors.black,
+  blockToolbarSelectedBackground: colors.greyMid,
   blockToolbarHoverBackground: colors.greyLight,
   blockToolbarDivider: colors.greyMid,
 
