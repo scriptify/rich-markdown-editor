@@ -53,19 +53,29 @@ const insertFiles = function(view, event, pos, files, options) {
     // happening in the background in parallel.
     uploadImage(file)
       .then(src => {
-        const pos = findPlaceholder(view.state, id);
-
-        // if the content around the placeholder has been deleted
-        // then forget about inserting this image
-        if (pos === null) return;
-
         // otherwise, insert it at the placeholder's position, and remove
         // the placeholder itself
-        const transaction = view.state.tr
-          .replaceWith(pos, pos, schema.nodes.image.create({ src }))
-          .setMeta(uploadPlaceholderPlugin, { remove: { id } });
+        const newImg = new Image();
 
-        view.dispatch(transaction);
+        newImg.onload = () => {
+          const pos = findPlaceholder(view.state, id);
+
+          // if the content around the placeholder has been deleted
+          // then forget about inserting this image
+          if (pos === null) return;
+
+          const transaction = view.state.tr
+            .replaceWith(pos, pos, schema.nodes.image.create({ src }))
+            .setMeta(uploadPlaceholderPlugin, { remove: { id } });
+
+          view.dispatch(transaction);
+        };
+
+        newImg.onerror = error => {
+          throw error;
+        };
+
+        newImg.src = src;
       })
       .catch(error => {
         console.error(error);
@@ -86,8 +96,8 @@ const insertFiles = function(view, event, pos, files, options) {
         complete++;
 
         // once everything is done, let the user know
-        if (complete === images.length) {
-          if (onImageUploadStop) onImageUploadStop();
+        if (complete === images.length && onImageUploadStop) {
+          onImageUploadStop();
         }
       });
   }

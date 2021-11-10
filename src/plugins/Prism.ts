@@ -1,6 +1,6 @@
 import refractor from "refractor/core";
 import flattenDeep from "lodash/flattenDeep";
-import { Plugin, PluginKey } from "prosemirror-state";
+import { Plugin, PluginKey, Transaction } from "prosemirror-state";
 import { Node } from "prosemirror-model";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { findBlockNodes } from "prosemirror-utils";
@@ -16,6 +16,7 @@ export const LANGUAGES = {
   java: "Java",
   javascript: "JavaScript",
   json: "JSON",
+  perl: "Perl",
   php: "PHP",
   powershell: "Powershell",
   python: "Python",
@@ -77,11 +78,12 @@ function getDecorations({ doc, name }: { doc: Node; name: string }) {
             to,
           };
         })
-        .map(node => {
-          return Decoration.inline(node.from, node.to, {
-            class: (node.classes || []).join(" "),
-          });
-        });
+        .filter(node => node.classes && node.classes.length)
+        .map(node =>
+          Decoration.inline(node.from, node.to, {
+            class: node.classes.join(" "),
+          })
+        );
 
       cache[block.pos] = {
         node: block.node,
@@ -111,13 +113,14 @@ export default function Prism({ name }) {
       init: (_: Plugin, { doc }) => {
         return DecorationSet.create(doc, []);
       },
-      apply: (transaction, decorationSet, oldState, state) => {
+      apply: (transaction: Transaction, decorationSet, oldState, state) => {
         const nodeName = state.selection.$head.parent.type.name;
         const previousNodeName = oldState.selection.$head.parent.type.name;
         const codeBlockChanged =
           transaction.docChanged && [nodeName, previousNodeName].includes(name);
+        const ySyncEdit = !!transaction.getMeta("y-sync$");
 
-        if (!highlighted || codeBlockChanged) {
+        if (!highlighted || codeBlockChanged || ySyncEdit) {
           highlighted = true;
           return getDecorations({ doc: transaction.doc, name });
         }

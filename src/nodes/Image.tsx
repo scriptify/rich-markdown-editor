@@ -1,7 +1,7 @@
 import * as React from "react";
-import { Plugin, NodeSelection } from "prosemirror-state";
+import { DownloadIcon } from "outline-icons";
+import { Plugin, TextSelection, NodeSelection } from "prosemirror-state";
 import { InputRule } from "prosemirror-inputrules";
-import { setTextSelection } from "prosemirror-utils";
 import styled from "styled-components";
 import ImageZoom from "react-medium-image-zoom";
 import getDataTransferFiles from "../lib/getDataTransferFiles";
@@ -17,7 +17,7 @@ import Node from "./Node";
  * ![](image.jpg "class") -> [, "", "image.jpg", "small"]
  * ![Lorem](image.jpg "class") -> [, "Lorem", "image.jpg", "small"]
  */
-const IMAGE_INPUT_REGEX = /!\[(?<alt>.*?)]\((?<filename>.*?)(?=\“|\))\“?(?<layoutclass>[^\”]+)?\”?\)/;
+const IMAGE_INPUT_REGEX = /!\[(?<alt>[^\]\[]*?)]\((?<filename>[^\]\[]*?)(?=\“|\))\“?(?<layoutclass>[^\]\[\”]+)?\”?\)$/;
 
 const uploadPlugin = options =>
   new Plugin({
@@ -97,6 +97,24 @@ const getLayoutAndTitle = tokenTitle => {
   }
 };
 
+const downloadImageNode = async node => {
+  const image = await fetch(node.attrs.src);
+  const imageBlob = await image.blob();
+  const imageURL = URL.createObjectURL(imageBlob);
+  const extension = imageBlob.type.split("/")[1];
+  const potentialName = node.attrs.alt || "image";
+
+  // create a temporary link node and click it with our image data
+  const link = document.createElement("a");
+  link.href = imageURL;
+  link.download = `${potentialName}.${extension}`;
+  document.body.appendChild(link);
+  link.click();
+
+  // cleanup
+  document.body.removeChild(link);
+};
+
 export default class Image extends Node {
   get name() {
     return "image";
@@ -134,10 +152,20 @@ export default class Image extends Node {
               ? layoutClassMatched[1]
               : null;
             return {
-              src: img.getAttribute("src"),
-              alt: img.getAttribute("alt"),
-              title: img.getAttribute("title"),
+              src: img?.getAttribute("src"),
+              alt: img?.getAttribute("alt"),
+              title: img?.getAttribute("title"),
               layoutClass: layoutClass,
+            };
+          },
+        },
+        {
+          tag: "img",
+          getAttrs: (dom: HTMLImageElement) => {
+            return {
+              src: dom.getAttribute("src"),
+              alt: dom.getAttribute("alt"),
+              title: dom.getAttribute("title"),
             };
           },
         },
@@ -165,9 +193,11 @@ export default class Image extends Node {
       event.preventDefault();
 
       const { view } = this.editor;
-      const pos = getPos() + node.nodeSize;
+      const $pos = view.state.doc.resolve(getPos() + node.nodeSize);
+      view.dispatch(
+        view.state.tr.setSelection(new TextSelection($pos)).split($pos.pos)
+      );
       view.focus();
-      view.dispatch(setTextSelection(pos)(view.state.tr));
       return;
     }
 
@@ -212,6 +242,12 @@ export default class Image extends Node {
     view.dispatch(transaction);
   };
 
+  handleDownload = ({ node }) => event => {
+    event.preventDefault();
+    event.stopPropagation();
+    downloadImageNode(node);
+  };
+
   component = props => {
     const { theme, isSelected } = props;
     const { alt, src, title, layoutClass } = props.node.attrs;
@@ -223,6 +259,12 @@ export default class Image extends Node {
           className={isSelected ? "ProseMirror-selectednode" : ""}
           onClick={this.handleSelect(props)}
         >
+          <Button>
+            <DownloadIcon
+              color="currentColor"
+              onClick={this.handleDownload(props)}
+            />
+          </Button>
           <ImageZoom
             image={{
               src,
@@ -245,6 +287,7 @@ export default class Image extends Node {
           role="textbox"
           contentEditable
           suppressContentEditableWarning
+          data-caption={this.options.dictionary.imageCaptionPlaceholder}
         >
           {alt}
         </Caption>
@@ -282,6 +325,17 @@ export default class Image extends Node {
 
   commands({ type }) {
     return {
+      downloadImage: () => async state => {
+        const { node } = state.selection;
+
+        if (node.type.name !== "image") {
+          return false;
+        }
+
+        downloadImageNode(node);
+
+        return true;
+      },
       deleteImage: () => (state, dispatch) => {
         dispatch(state.tr.deleteSelection());
         return true;
@@ -293,7 +347,7 @@ export default class Image extends Node {
           layoutClass: "right-50",
         };
         const { selection } = state;
-        dispatch(state.tr.setNodeMarkup(selection.$from.pos, undefined, attrs));
+        dispatch(state.tr.setNodeMarkup(selection.from, undefined, attrs));
         return true;
       },
       alignLeft: () => (state, dispatch) => {
@@ -303,13 +357,13 @@ export default class Image extends Node {
           layoutClass: "left-50",
         };
         const { selection } = state;
-        dispatch(state.tr.setNodeMarkup(selection.$from.pos, undefined, attrs));
+        dispatch(state.tr.setNodeMarkup(selection.from, undefined, attrs));
         return true;
       },
       alignCenter: () => (state, dispatch) => {
         const attrs = { ...state.selection.node.attrs, layoutClass: null };
         const { selection } = state;
-        dispatch(state.tr.setNodeMarkup(selection.$from.pos, undefined, attrs));
+        dispatch(state.tr.setNodeMarkup(selection.from, undefined, attrs));
         return true;
       },
       createImage: attrs => (state, dispatch) => {
@@ -330,6 +384,7 @@ export default class Image extends Node {
       new InputRule(IMAGE_INPUT_REGEX, (state, match, start, end) => {
         const [okay, alt, src, matchedTitle] = match;
         const { tr } = state;
+
         if (okay) {
           tr.replaceWith(
             start - 1,
@@ -352,9 +407,43 @@ export default class Image extends Node {
   }
 }
 
+const Button = styled.button`
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  border-radius: 4px;
+  background: ${props => props.theme.background};
+  color: ${props => props.theme.textSecondary};
+  width: 24px;
+  height: 24px;
+  display: inline-block;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms ease-in-out;
+
+  &:active {
+    transform: scale(0.98);
+  }
+
+  &:hover {
+    color: ${props => props.theme.text};
+    opacity: 1;
+  }
+`;
+
 const ImageWrapper = styled.span`
   line-height: 0;
   display: inline-block;
+  position: relative;
+
+  &:hover {
+    ${Button} {
+      opacity: 0.9;
+    }
+  }
 `;
 
 const Caption = styled.p`
@@ -362,6 +451,7 @@ const Caption = styled.p`
   display: block;
   font-size: 13px;
   font-style: italic;
+  font-weight: normal;
   color: ${props => props.theme.textSecondary};
   padding: 2px 0;
   line-height: 16px;
@@ -375,7 +465,7 @@ const Caption = styled.p`
 
   &:empty:before {
     color: ${props => props.theme.placeholder};
-    content: "Write a caption";
+    content: attr(data-caption);
     pointer-events: none;
   }
 `;

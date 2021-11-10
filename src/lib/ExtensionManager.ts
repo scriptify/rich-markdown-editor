@@ -7,10 +7,10 @@ import Extension from "./Extension";
 import makeRules from "./markdown/rules";
 import Node from "../nodes/Node";
 import Mark from "../marks/Mark";
+import { PluginSimple } from "markdown-it";
 
 export default class ExtensionManager {
   extensions: Extension[];
-  embeds;
 
   constructor(extensions: Extension[] = [], editor?: Editor) {
     if (editor) {
@@ -20,7 +20,6 @@ export default class ExtensionManager {
     }
 
     this.extensions = extensions;
-    this.embeds = editor ? editor.props.embeds : undefined;
   }
 
   get nodes() {
@@ -59,7 +58,15 @@ export default class ExtensionManager {
     return new MarkdownSerializer(nodes, marks);
   }
 
-  parser({ schema }) {
+  parser({
+    schema,
+    rules,
+    plugins,
+  }: {
+    schema: any;
+    rules?: Record<string, any>;
+    plugins?: PluginSimple[];
+  }): MarkdownParser {
     const tokens: Record<string, any> = this.extensions
       .filter(
         extension => extension.type === "mark" || extension.type === "node"
@@ -74,11 +81,7 @@ export default class ExtensionManager {
         };
       }, {});
 
-    return new MarkdownParser(
-      schema,
-      makeRules({ embeds: this.embeds }),
-      tokens
-    );
+    return new MarkdownParser(schema, makeRules({ rules, plugins }), tokens);
   }
 
   get marks() {
@@ -95,8 +98,20 @@ export default class ExtensionManager {
 
   get plugins() {
     return this.extensions
-      .filter(extension => extension.plugins)
+      .filter(extension => "plugins" in extension)
       .reduce((allPlugins, { plugins }) => [...allPlugins, ...plugins], []);
+  }
+
+  get rulePlugins() {
+    return this.extensions
+      .filter(extension => "rulePlugins" in extension)
+      .reduce(
+        (allRulePlugins, { rulePlugins }) => [
+          ...allRulePlugins,
+          ...rulePlugins,
+        ],
+        []
+      );
   }
 
   keymaps({ schema }: { schema: Schema }) {

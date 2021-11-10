@@ -8,6 +8,7 @@ import java from "refractor/lang/java";
 import javascript from "refractor/lang/javascript";
 import json from "refractor/lang/json";
 import markup from "refractor/lang/markup";
+import perl from "refractor/lang/perl";
 import php from "refractor/lang/php";
 import python from "refractor/lang/python";
 import powershell from "refractor/lang/powershell";
@@ -15,13 +16,18 @@ import ruby from "refractor/lang/ruby";
 import sql from "refractor/lang/sql";
 import typescript from "refractor/lang/typescript";
 import yaml from "refractor/lang/yaml";
-import { setBlockType } from "prosemirror-commands";
+
+import { Selection, TextSelection, Transaction } from "prosemirror-state";
 import { textblockTypeInputRule } from "prosemirror-inputrules";
 import copy from "copy-to-clipboard";
 import Prism, { LANGUAGES } from "../plugins/Prism";
+import toggleBlockType from "../commands/toggleBlockType";
 import isInCode from "../queries/isInCode";
 import Node from "./Node";
 import { ToastType } from "../types";
+
+const PERSISTENCE_KEY = "rme-code-language";
+const DEFAULT_LANGUAGE = "javascript";
 
 [
   bash,
@@ -33,6 +39,7 @@ import { ToastType } from "../types";
   javascript,
   json,
   markup,
+  perl,
   php,
   python,
   powershell,
@@ -55,7 +62,7 @@ export default class CodeFence extends Node {
     return {
       attrs: {
         language: {
-          default: "javascript",
+          default: DEFAULT_LANGUAGE,
         },
       },
       content: "text*",
@@ -105,18 +112,36 @@ export default class CodeFence extends Node {
     };
   }
 
-  commands({ type }) {
-    return () => setBlockType(type);
+  commands({ type, schema }) {
+    return attrs =>
+      toggleBlockType(type, schema.nodes.paragraph, {
+        language: localStorage?.getItem(PERSISTENCE_KEY) || DEFAULT_LANGUAGE,
+        ...attrs,
+      });
   }
 
-  keys({ type }) {
+  keys({ type, schema }) {
     return {
-      "Shift-Ctrl-\\": setBlockType(type),
+      "Shift-Ctrl-\\": toggleBlockType(type, schema.nodes.paragraph),
       "Shift-Enter": (state, dispatch) => {
         if (!isInCode(state)) return false;
+        const {
+          tr,
+          selection,
+        }: { tr: Transaction; selection: TextSelection } = state;
+        const text = selection?.$anchor?.nodeBefore?.text;
 
-        const { tr, selection } = state;
-        dispatch(tr.insertText("\n", selection.from, selection.to));
+        let newText = "\n";
+
+        if (text) {
+          const splitByNewLine = text.split("\n");
+          const numOfSpaces = splitByNewLine[splitByNewLine.length - 1].search(
+            /\S|$/
+          );
+          newText += " ".repeat(numOfSpaces);
+        }
+
+        dispatch(tr.insertText(newText, selection.from, selection.to));
         return true;
       },
       Tab: (state, dispatch) => {
@@ -157,10 +182,16 @@ export default class CodeFence extends Node {
     const result = view.posAtCoords({ top, left });
 
     if (result) {
-      const transaction = tr.setNodeMarkup(result.inside, undefined, {
-        language: element.value,
-      });
+      const language = element.value;
+
+      const transaction = tr
+        .setSelection(Selection.near(view.state.doc.resolve(result.inside)))
+        .setNodeMarkup(result.inside, undefined, {
+          language,
+        });
       view.dispatch(transaction);
+
+      localStorage?.setItem(PERSISTENCE_KEY, language);
     }
   };
 

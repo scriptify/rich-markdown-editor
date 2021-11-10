@@ -8,6 +8,8 @@ export default {
   title: "Editor",
   component: Editor,
   argTypes: {
+    value: { control: "text" },
+    readOnly: { control: "boolean" },
     onSave: { action: "save" },
     onCancel: { action: "cancel" },
     onClickHashtag: { action: "hashtag clicked" },
@@ -16,6 +18,10 @@ export default {
     onShowToast: { action: "toast" },
     onFocus: { action: "focused" },
     onBlur: { action: "blurred" },
+    disableExtensions: { control: "array" },
+  },
+  args: {
+    disableExtensions: [],
   },
 } as Meta;
 
@@ -26,6 +32,15 @@ Default.args = {
   defaultValue: `# Welcome
 
 Just an easy to use **Markdown** editor with \`slash commands\``,
+};
+
+export const Emoji = Template.bind({});
+Emoji.args = {
+  defaultValue: `# Emoji
+
+\
+:1st_place_medal:
+`,
 };
 
 export const TemplateDoc = Template.bind({});
@@ -206,4 +221,16 @@ Dark.args = {
   defaultValue: `# Dark
 
 There's a customizable dark theme too`,
+};
+
+export const RTL = Template.bind({});
+RTL.args = {
+  dir: "rtl",
+  defaultValue: `# خوش آمدید
+
+متن نمونه برای نمایش پشتیبانی از زبان‌های RTL نظیر فارسی، عربی، عبری و ...
+
+\\
+- [x] آیتم اول
+- [ ] آیتم دوم`,
 };
