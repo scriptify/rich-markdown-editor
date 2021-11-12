@@ -53,6 +53,7 @@ export default class Link extends Mark {
         {
           ...node.attrs,
           rel: "noopener noreferrer nofollow",
+          align: "center",
         },
         0,
       ],
@@ -66,7 +67,7 @@ export default class Link extends Mark {
         const { tr } = state;
 
         if (okay) {
-          tr.replaceWith(start, end, this.editor.schema.text(alt)).addMark(
+          tr.replaceWith(start, end, this.editor.schema.text("WHAT??")).addMark(
             start,
             start + alt.length,
             type.create({ href })

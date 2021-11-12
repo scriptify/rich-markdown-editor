@@ -64,6 +64,7 @@ import Link from "./marks/Link";
 import Strikethrough from "./marks/Strikethrough";
 import TemplatePlaceholder from "./marks/Placeholder";
 import Underline from "./marks/Underline";
+import TextCenter from "./marks/TextCenter";
 
 // plugins
 import BlockMenuTrigger from "./plugins/BlockMenuTrigger";
@@ -370,6 +371,7 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
             onHoverLink: this.props.onHoverLink,
           }),
           new Strikethrough(),
+          new TextCenter(),
           new OrderedList(),
           new History(),
           new Folding(),

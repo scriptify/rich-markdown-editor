@@ -25,7 +25,7 @@ export default {
   },
 } as Meta;
 
-const Template: Story<Props> = args => <Editor {...args} />;
+const Template: Story<Props> = (args) => <Editor {...args} />;
 
 export const Default = Template.bind({});
 Default.args = {
@@ -106,6 +106,8 @@ Marks.args = {
   defaultValue: `This document shows the variety of marks available, most can be accessed through the formatting menu by selecting text or by typing out the Markdown manually.
 
 \\
+<p align="center">Hello world</p>
+@@Hello world@@
 **bold**
 _italic_
 ~~strikethrough~~
@@ -114,6 +116,7 @@ __underline__
 \`inline code\`
 !!placeholder!!
 [a link](http://www.getoutline.com)
+
 `,
 };
 
@@ -189,7 +192,7 @@ Persisted.args = {
     `# Persisted
   
 The contents of this editor are persisted to local storage on change (edit and reload)`,
-  onChange: debounce(value => {
+  onChange: debounce((value) => {
     const text = value();
     localStorage.setItem("saved", text);
   }, 250),

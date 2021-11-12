@@ -11,6 +11,7 @@ import {
   TodoListIcon,
   InputIcon,
   HighlightIcon,
+  AlignCenterIcon,
 } from "outline-icons";
 import { isInTable } from "prosemirror-tables";
 import { EditorState } from "prosemirror-state";
@@ -130,6 +131,13 @@ export default function formattingMenuItems(
       icon: LinkIcon,
       active: isMarkActive(schema.marks.link),
       attrs: { href: "" },
+    },
+    {
+      name: "textcenter",
+      title: "Center",
+      icon: AlignCenterIcon,
+      keywords: "center",
+      active: isMarkActive(schema.marks.textcenter),
     },
   ];
 }
