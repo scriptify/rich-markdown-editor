@@ -122,7 +122,7 @@ export default function Example(props) {
 
           // Delay to simulate time taken to upload
           return new Promise((resolve) => {
-            setTimeout(() => resolve(URL.createObjectURL(file)), 100);
+            setTimeout(() => resolve(URL.createObjectURL(file)), 3000);
           });
         }}
         embeds={embeds}

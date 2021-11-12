@@ -16,12 +16,26 @@ const uploadPlaceholder = new Plugin({
 
       if (action && action.add) {
         const element = document.createElement("div");
-        element.className = "image placeholder";
 
-        const img = document.createElement("img");
-        img.src = URL.createObjectURL(action.add.file);
+        if (action.isImage) {
+          element.className = "image placeholder";
 
-        element.appendChild(img);
+          const img = document.createElement("img");
+          img.src = URL.createObjectURL(action.add.file);
+          element.appendChild(img);
+        } else {
+          element.setAttribute(
+            "style",
+            `
+            background: #000;
+            color: #fff;
+            padding: 0.1rem;
+            border-radius: 0.2rem;
+            display: inline;
+          `
+          );
+          element.innerHTML = `${action.add.file.name} ...`;
+        }
 
         const deco = Decoration.widget(action.add.pos, element, {
           id: action.add.id,
@@ -29,7 +43,7 @@ const uploadPlaceholder = new Plugin({
         set = set.add(tr.doc, [deco]);
       } else if (action && action.remove) {
         set = set.remove(
-          set.find(null, null, spec => spec.id === action.remove.id)
+          set.find(null, null, (spec) => spec.id === action.remove.id)
         );
       }
       return set;
@@ -46,6 +60,6 @@ export default uploadPlaceholder;
 
 export function findPlaceholder(state, id) {
   const decos = uploadPlaceholder.getState(state);
-  const found = decos.find(null, null, spec => spec.id === id);
+  const found = decos.find(null, null, (spec) => spec.id === id);
   return found.length ? found[0].from : null;
 }

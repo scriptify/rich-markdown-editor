@@ -44,7 +44,7 @@ const insertFiles = function(view, event, pos, files, options) {
 
     // insert a placeholder at this position
     tr.setMeta(uploadPlaceholderPlugin, {
-      add: { id, file, pos },
+      add: { id, file, pos, isImage },
     });
     view.dispatch(tr);
 
@@ -85,7 +85,7 @@ const insertFiles = function(view, event, pos, files, options) {
           if (pos === null) return;
 
           const attrs = {
-            title: src,
+            title: file.name,
             href: src,
           };
           const linkNode = schema.text(attrs.title, [
