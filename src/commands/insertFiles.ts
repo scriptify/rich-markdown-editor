@@ -4,21 +4,17 @@ import uploadPlaceholderPlugin, {
 import { ToastType } from "../types";
 
 const insertFiles = function(view, event, pos, files, options) {
-  // filter to only include image files
-  const images = files.filter(file => /image/i.test(file.type));
-  if (images.length === 0) return;
-
   const {
     dictionary,
-    uploadImage,
-    onImageUploadStart,
-    onImageUploadStop,
+    uploadFile,
+    onFileUploadStart,
+    onFileUploadStop,
     onShowToast,
   } = options;
 
-  if (!uploadImage) {
+  if (!uploadFile) {
     console.warn(
-      "uploadImage callback must be defined to handle image uploads."
+      "uploadFile callback must be defined to handle image uploads."
     );
     return;
   }
@@ -28,16 +24,20 @@ const insertFiles = function(view, event, pos, files, options) {
   event.preventDefault();
 
   // let the user know we're starting to process the images
-  if (onImageUploadStart) onImageUploadStart();
+  if (onFileUploadStart) onFileUploadStart();
 
   const { schema } = view.state;
+
+  (window as any).schemaNodes = schema.nodes;
 
   // we'll use this to track of how many images have succeeded or failed
   let complete = 0;
 
   // the user might have dropped multiple images at once, we need to loop
-  for (const file of images) {
+  for (const file of files) {
     // Use an object to act as the ID for this upload, clever.
+    const isImage = /image/i.test(file.type);
+
     const id = {};
 
     const { tr } = view.state;
@@ -51,33 +51,55 @@ const insertFiles = function(view, event, pos, files, options) {
     // start uploading the image file to the server. Using "then" syntax
     // to allow all placeholders to be entered at once with the uploads
     // happening in the background in parallel.
-    uploadImage(file)
-      .then(src => {
-        // otherwise, insert it at the placeholder's position, and remove
-        // the placeholder itself
-        const newImg = new Image();
+    uploadFile(file)
+      .then((src) => {
+        if (isImage) {
+          // otherwise, insert it at the placeholder's position, and remove
+          // the placeholder itself
+          const newImg = new Image();
 
-        newImg.onload = () => {
+          newImg.onload = () => {
+            const pos = findPlaceholder(view.state, id);
+
+            // if the content around the placeholder has been deleted
+            // then forget about inserting this image
+            if (pos === null) return;
+
+            const transaction = view.state.tr
+              .replaceWith(pos, pos, schema.nodes.image.create({ src }))
+              .setMeta(uploadPlaceholderPlugin, { remove: { id } });
+
+            view.dispatch(transaction);
+          };
+
+          newImg.onerror = (error) => {
+            throw error;
+          };
+
+          newImg.src = src;
+        } else {
           const pos = findPlaceholder(view.state, id);
 
           // if the content around the placeholder has been deleted
           // then forget about inserting this image
           if (pos === null) return;
 
+          const attrs = {
+            title: src,
+            href: src,
+          };
+          const linkNode = schema.text(attrs.title, [
+            schema.marks.link.create(attrs),
+          ]);
+          // Remove placeholder, replace with actual URL
           const transaction = view.state.tr
-            .replaceWith(pos, pos, schema.nodes.image.create({ src }))
+            .replaceWith(pos, pos, linkNode)
             .setMeta(uploadPlaceholderPlugin, { remove: { id } });
 
           view.dispatch(transaction);
-        };
-
-        newImg.onerror = error => {
-          throw error;
-        };
-
-        newImg.src = src;
+        }
       })
-      .catch(error => {
+      .catch((error) => {
         console.error(error);
 
         // cleanup the placeholder if there is a failure
@@ -96,8 +118,8 @@ const insertFiles = function(view, event, pos, files, options) {
         complete++;
 
         // once everything is done, let the user know
-        if (complete === images.length && onImageUploadStop) {
-          onImageUploadStop();
+        if (complete === files.length && onFileUploadStop) {
+          onFileUploadStop();
         }
       });
   }

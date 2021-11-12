@@ -134,14 +134,14 @@ export type Props = {
   handleDOMEvents?: {
     [name: string]: (view: EditorView, event: Event) => boolean;
   };
-  uploadImage?: (file: File) => Promise<string>;
+  uploadFile?: (file: File) => Promise<string>;
   onBlur?: () => void;
   onFocus?: () => void;
   onSave?: ({ done: boolean }) => void;
   onCancel?: () => void;
   onChange?: (value: () => string) => void;
-  onImageUploadStart?: () => void;
-  onImageUploadStop?: () => void;
+  onFileUploadStart?: () => void;
+  onFileUploadStop?: () => void;
   onCreateLink?: (title: string) => Promise<string>;
   onSearchLink?: (term: string) => Promise<SearchResult[]>;
   onClickLink: (href: string, event: MouseEvent) => void;
@@ -343,9 +343,9 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
           new HorizontalRule(),
           new Image({
             dictionary,
-            uploadImage: this.props.uploadImage,
-            onImageUploadStart: this.props.onImageUploadStart,
-            onImageUploadStop: this.props.onImageUploadStop,
+            uploadImage: this.props.uploadFile,
+            onImageUploadStart: this.props.onFileUploadStart,
+            onImageUploadStop: this.props.onFileUploadStop,
             onShowToast: this.props.onShowToast,
           }),
           new Table(),
@@ -804,10 +804,10 @@ class RichMarkdownEditor extends React.PureComponent<Props, State> {
                   isActive={this.state.blockMenuOpen}
                   search={this.state.blockMenuSearch}
                   onClose={this.handleCloseBlockMenu}
-                  uploadImage={this.props.uploadImage}
+                  uploadFile={this.props.uploadFile}
                   onLinkToolbarOpen={this.handleOpenLinkMenu}
-                  onImageUploadStart={this.props.onImageUploadStart}
-                  onImageUploadStop={this.props.onImageUploadStop}
+                  onFileUploadStart={this.props.onFileUploadStart}
+                  onFileUploadStop={this.props.onFileUploadStop}
                   onShowToast={this.props.onShowToast}
                   embeds={this.props.embeds}
                 />

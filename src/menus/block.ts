@@ -15,6 +15,7 @@ import {
   WarningIcon,
   InfoIcon,
   LinkIcon,
+  DocumentIcon as PdfIcon,
 } from "outline-icons";
 import { MenuItem } from "../types";
 import baseDictionary from "../dictionary";
@@ -114,6 +115,12 @@ export default function blockMenuItems(
       title: dictionary.image,
       icon: ImageIcon,
       keywords: "picture photo",
+    },
+    {
+      name: "pdf",
+      title: dictionary.pdf,
+      icon: PdfIcon,
+      keywords: "pdf document",
     },
     {
       name: "link",
